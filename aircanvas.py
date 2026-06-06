@@ -24,11 +24,14 @@ from canvas_manager import CanvasManager
 from gesture_detector import GestureDetector
 from hand_tracker import HandTracker
 from overlay import (
+    MAX_THICKNESS,
+    MIN_THICKNESS,
     PALETTE_COLORS,
     draw_hud,
     draw_palette,
     hit_test_palette,
     palette_cells,
+    thickness_from_spread,
 )
 
 
@@ -76,9 +79,11 @@ def main():
         gesture = detector.detect(landmarks, fingers)
 
         # Palet üzerine hover kontrolü
+        over_palette = False
         if landmarks is not None and gesture in ("DRAW", "PEN_UP", "HOVER"):
             picked = hit_test_palette(landmarks[8], cells)
             if picked is not None:
+                over_palette = True
                 if picked == palette_hover_color:
                     palette_hover_frames += 1
                 else:
@@ -94,6 +99,13 @@ def main():
         else:
             palette_hover_color = None
             palette_hover_frames = 0
+
+        # PEN_UP esnasında başparmak-işaret açıklığı = fırça kalınlığı
+        if gesture == "PEN_UP" and landmarks is not None and not over_palette:
+            target = thickness_from_spread(landmarks[4], landmarks[8])
+            smoothed = 0.7 * canvas.brush_thickness + 0.3 * target
+            new_t = max(MIN_THICKNESS, min(MAX_THICKNESS, int(round(smoothed))))
+            canvas.set_brush(canvas.brush_color, new_t)
 
         if gesture in modifying and prev_gesture not in modifying:
             canvas.push_history()
@@ -129,10 +141,12 @@ def main():
             if gesture == "ERASE":
                 cv2.circle(frame, eraser_point, canvas.eraser_thickness // 2, (200, 200, 200), 2)
             elif gesture == "PEN_UP":
-                cv2.circle(frame, index_tip, 14, (0, 255, 255), 2)
-                cv2.circle(frame, index_tip, 2, (0, 255, 255), -1)
+                cv2.line(frame, landmarks[4], landmarks[8], (0, 255, 255), 1)
+                preview_r = max(4, canvas.brush_thickness)
+                cv2.circle(frame, index_tip, preview_r, canvas.brush_color, 2)
+                cv2.circle(frame, index_tip, 3, (0, 255, 255), -1)
             elif gesture == "DRAW":
-                cv2.circle(frame, index_tip, 8, canvas.brush_color, -1)
+                cv2.circle(frame, index_tip, max(4, canvas.brush_thickness // 2 + 2), canvas.brush_color, -1)
             elif gesture == "PINCH":
                 cv2.line(frame, landmarks[4], landmarks[8], (0, 255, 0), 2)
                 cv2.circle(frame, index_tip, 10, (0, 255, 0), 2)

@@ -20,11 +20,14 @@ from canvas_manager import CanvasManager
 from gesture_detector import GestureDetector
 from hand_tracker import HandTracker
 from overlay import (
+    MAX_THICKNESS,
+    MIN_THICKNESS,
     PALETTE_COLORS,
     draw_hud,
     draw_palette,
     hit_test_palette,
     palette_cells,
+    thickness_from_spread,
 )
 
 
@@ -97,9 +100,11 @@ class AirCanvasProcessor(VideoProcessorBase):
 
         # Palette hit-test (sadece DRAW/PEN_UP/HOVER esnasında)
         cells = palette_cells(640)
+        over_palette = False
         if landmarks is not None and gesture in ("DRAW", "PEN_UP", "HOVER"):
             picked = hit_test_palette(landmarks[8], cells)
             if picked is not None:
+                over_palette = True
                 if picked == self._palette_hover_color:
                     self._palette_hover_frames += 1
                 else:
@@ -117,6 +122,13 @@ class AirCanvasProcessor(VideoProcessorBase):
         else:
             self._palette_hover_color = None
             self._palette_hover_frames = 0
+
+        # PEN_UP esnasında başparmak-işaret açıklığı = fırça kalınlığı
+        if gesture == "PEN_UP" and landmarks is not None and not over_palette:
+            target = thickness_from_spread(landmarks[4], landmarks[8])
+            smoothed = 0.7 * self.brush_thickness + 0.3 * target
+            self.brush_thickness = max(MIN_THICKNESS, min(MAX_THICKNESS, int(round(smoothed))))
+            self.canvas.set_brush(self.brush_color, self.brush_thickness)
 
         self._maybe_push_history(gesture)
 
@@ -156,10 +168,13 @@ class AirCanvasProcessor(VideoProcessorBase):
             if gesture == "ERASE":
                 cv2.circle(img, eraser_point, self.canvas.eraser_thickness // 2, (200, 200, 200), 2)
             elif gesture == "PEN_UP":
-                cv2.circle(img, index_tip, 14, (0, 255, 255), 2)
-                cv2.circle(img, index_tip, 2, (0, 255, 255), -1)
+                # Açıklık çizgisi + brush-size önizleme dairesi (radius=kalınlık)
+                cv2.line(img, landmarks[4], landmarks[8], (0, 255, 255), 1)
+                preview_r = max(4, self.brush_thickness)
+                cv2.circle(img, index_tip, preview_r, self.brush_color, 2)
+                cv2.circle(img, index_tip, 3, (0, 255, 255), -1)
             elif gesture == "DRAW":
-                cv2.circle(img, index_tip, 8, self.brush_color, -1)
+                cv2.circle(img, index_tip, max(4, self.brush_thickness // 2 + 2), self.brush_color, -1)
             elif gesture == "PINCH":
                 cv2.line(img, landmarks[4], landmarks[8], (0, 255, 0), 2)
                 cv2.circle(img, index_tip, 10, (0, 255, 0), 2)
@@ -187,11 +202,6 @@ def render_sidebar():
     st.sidebar.title("AirCanvas AI")
     st.sidebar.caption("Jest kontrollu cizim ve not platformu")
 
-    color_names = [n for n, _ in PALETTE_COLORS]
-    color_lookup = dict(PALETTE_COLORS)
-    color_name = st.sidebar.selectbox("Firca rengi", color_names, index=0)
-    thickness = st.sidebar.slider("Firca kalinligi", 2, 30, 6)
-
     col_undo, col_redo = st.sidebar.columns(2)
     undo = col_undo.button("Geri al")
     redo = col_redo.button("Yinele")
@@ -217,19 +227,18 @@ def render_sidebar():
         st.markdown(
             """
 - **Cizim**: sadece isaret parmagi acik (basparmak kapali)
-- **Kalem havada**: isaret + basparmak ikisi de acik
+- **Kalem havada**: isaret + basparmak acik. Iki parmak arasi mesafe = firca kalinligi
+  - Genis acarsan kalin, daraltirsan ince
 - **Silgi**: isaret + orta parmak acik
 - **Tutma/Tasi**: basparmak ucu + isaret ucu birbirine deger (pinch)
   - Parmak altinda not varsa onu, yoksa tum tuvali tasir
 - **Screenshot**: yumruk -> ani 5 parmak acilis
 - **Tum tuval temizle**: avuc tamamen acik (5 parmak)
-- **Renk paleti**: imleci ust palet seridine getir, ~5 kare bekle
+- **Renk secimi**: imleci ust palet seridine getir, ~5 kare bekle
             """
         )
 
     return {
-        "color": color_lookup[color_name],
-        "thickness": thickness,
         "clear": clear,
         "undo": undo,
         "redo": redo,
@@ -282,8 +291,6 @@ def main():
 
     if ctx.video_processor:
         vp = ctx.video_processor
-        vp.brush_color = controls["color"]
-        vp.brush_thickness = controls["thickness"]
         vp.note_text = controls["note_text"]
         vp.shape_correction = controls["shape_correction"]
         vp.show_pip = controls["show_pip"]

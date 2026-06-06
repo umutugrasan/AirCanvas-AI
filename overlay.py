@@ -1,6 +1,22 @@
-"""Renk paleti ve HUD katmanı yardımcıları (app.py + aircanvas.py paylaşır)."""
+"""Renk paleti, HUD ve jest tabanlı kalınlık hesabı (app.py + aircanvas.py paylaşır)."""
+
+import math
 
 import cv2
+
+
+MIN_THICKNESS = 2
+MAX_THICKNESS = 30
+SPREAD_MIN_PX = 40   # parmaklar bitişikken
+SPREAD_MAX_PX = 200  # parmaklar tam açıkken
+
+
+def thickness_from_spread(thumb_tip, index_tip):
+    """Başparmak-işaret mesafesini [MIN, MAX] kalınlık aralığına eşler."""
+    d = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
+    d = max(SPREAD_MIN_PX, min(SPREAD_MAX_PX, d))
+    span = SPREAD_MAX_PX - SPREAD_MIN_PX
+    return MIN_THICKNESS + (d - SPREAD_MIN_PX) / span * (MAX_THICKNESS - MIN_THICKNESS)
 
 
 PALETTE_COLORS = [

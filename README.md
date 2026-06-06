@@ -9,7 +9,7 @@ Web kamerası önündeki el hareketlerini gerçek zamanlı analiz eden, OpenCV +
 | Jest | Mantık (MediaPipe) | Tetiklenen İşlev |
 |------|--------------------|------------------|
 | **Hassas Çizim** | Sadece işaret parmağı açık (başparmak yumruğa kıvrık) | 8. nokta (işaret ucu) takibiyle tuvale çizim |
-| **Kalem Havada** | İşaret + başparmak birlikte açık | Çizmez, sadece imleci taşır — harfler arası boşluk için |
+| **Kalem Havada** | İşaret + başparmak birlikte açık | Çizmez, imleci taşır + **iki parmak arası mesafe = fırça kalınlığı** (geniş → kalın) |
 | **Tutma / Taşıma** | Başparmak ucu + işaret ucu birbirine değer (pinch) | Parmak altında not varsa onu, yoksa tüm tuvali blok halinde taşır |
 | **Akıllı Silgi** | İşaret + orta parmak açık (makas/barış işareti) | İki parmağın orta noktası bölgesel silgi olur |
 | **Ekran Görüntüsü** | Yumruk → ani 5 parmak açılışı | Mevcut kareyi dondurup "kağıt altlık" haline getirir |
@@ -20,6 +20,7 @@ Web kamerası önündeki el hareketlerini gerçek zamanlı analiz eden, OpenCV +
 - **Resim yükle → üzerine yaz**: yan panelden PNG/JPG yükle, üstüne not düş.
 - **PIP webcam**: kullanıcı sağ alt köşede küçük thumbnail olarak görünür.
 - **Havadan renk paleti**: ekranın üst şeridindeki paletin üzerine işaret parmağıyla yaklaş, ~5 kare bekle → renk seçilir. Çizim akışını kesmez.
+- **Havadan fırça kalınlığı**: Kalem havadayken (PEN_UP) başparmak ile işaret arasındaki mesafe doğrudan kalınlığa eşlenir (40–200 px → 2–30 px). Cursor üzerinde gerçek kalınlıkta önizleme dairesi gösterilir.
 - **Geri al / Yinele**: her stroke öncesi canvas snapshot'ı; sınır 30 adım.
 - **Şekil düzeltme** (toggleable): DRAW jesti bitince stroke yeterince kapalıysa elipse, yeterince doğrusalsa düz çizgiye snap eder.
 - **PNG olarak indir**: composed (kamera + tuval + arka plan + notlar) tek tıkla indirilir.
@@ -67,12 +68,13 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Tarayıcı sekmesinde **START** → kamera izni ver. Yan panelden:
+Tarayıcı sekmesinde **START** → kamera izni ver. Renk paleti ve fırça kalınlığı **doğrudan jestlerle** kontrol edilir; yan panel sade tutulmuştur:
 
-- Fırça rengi, kalınlık, Geri al / Yinele, Tuvali temizle
+- Geri al / Yinele / Tuvali temizle butonları
 - **Resim yükle** → çizimi mevcut resim üzerine yap
 - **Sağ altta PIP webcam** kutusunu aç/kapat
 - **Şekil düzeltme** anahtarı
+- Not ekleme (parmak ucuna)
 - **PNG olarak indir** düğmesi (akışı başlattıktan sonra görünür)
 
 ### Bağımsız OpenCV sürümü
@@ -98,7 +100,7 @@ python aircanvas.py
 
 Karenin üst şeridinde gerçek zamanlı jest etiketi; ayrıca:
 
-- 🟡 Boş sarı halka → kalem havada (PEN_UP)
+- 🟡 Sarı çizgi (başparmak↔işaret) + brush renginde halka → kalem havada (PEN_UP); halkanın yarıçapı = mevcut fırça kalınlığı
 - 🔵 Dolu daire (fırça renginde) → kalem yerde (DRAW)
 - 🟢 Yeşil çizgi + halka → pinch ile tutma (PINCH)
 - ⚪ İnce gri daire → silgi sınırı (ERASE)
