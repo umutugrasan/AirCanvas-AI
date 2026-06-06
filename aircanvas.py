@@ -1,52 +1,40 @@
 """AirCanvas AI - Bağımsız OpenCV sürümü.
 
-Webcam penceresi açar, MediaPipe ile el iskeletini takip eder ve PDF'te tanımlı
-beş jeste göre çizim/silme/screenshot işlemlerini gerçekleştirir.
+Webcam penceresi açar, MediaPipe ile el iskeletini takip eder ve jestlere göre
+çizim/silme/tutma/screenshot işlemlerini gerçekleştirir.
 
 Klavye kısayolları:
-    q  -> çık
-    c  -> tuvali temizle
-    n  -> mevcut konuma örnek not ekle
-    1/2/3/4 -> fırça rengi (mavi/yeşil/kırmızı/sarı)
-    +/- -> fırça kalınlığını değiştir
+    q       -> çık
+    c       -> tuvali temizle
+    n       -> mevcut parmak ucuna örnek not ekle
+    1-6     -> palet renkleri (mavi/yeşil/kırmızı/sarı/pembe/beyaz)
+    + / -   -> fırça kalınlığı
+    z / y   -> geri al / yinele
+    s       -> şekil düzeltmeyi aç/kapat
+    p       -> tuvali PNG olarak kaydet
+    b       -> arka plana son screenshot'ı sabitle / temizle
+    h       -> PIP webcam'i aç/kapat
 """
+
+import time
 
 import cv2
 
 from canvas_manager import CanvasManager
 from gesture_detector import GestureDetector
 from hand_tracker import HandTracker
+from overlay import (
+    PALETTE_COLORS,
+    draw_hud,
+    draw_palette,
+    hit_test_palette,
+    palette_cells,
+)
 
 
-COLORS = {
-    ord("1"): (255, 0, 0),     # mavi
-    ord("2"): (0, 255, 0),     # yeşil
-    ord("3"): (0, 0, 255),     # kırmızı
-    ord("4"): (0, 255, 255),   # sarı
+COLOR_KEYS = {
+    ord(str(i + 1)): color for i, (_, color) in enumerate(PALETTE_COLORS[:6])
 }
-
-
-def overlay_hud(frame, gesture, brush_color, brush_thickness):
-    cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (30, 30, 30), -1)
-    cv2.putText(
-        frame,
-        f"Jest: {gesture}",
-        (10, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 255),
-        2,
-    )
-    cv2.circle(frame, (frame.shape[1] - 60, 20), 12, brush_color, -1)
-    cv2.putText(
-        frame,
-        f"{brush_thickness}px",
-        (frame.shape[1] - 40, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 255, 255),
-        2,
-    )
 
 
 def main():
@@ -55,14 +43,25 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     if not cap.isOpened():
-        raise RuntimeError("Webcam acilamadi. Kameranin baska bir uygulama tarafindan kullanilmadigindan emin olun.")
+        raise RuntimeError("Webcam acilamadi. Baska bir uygulamanin kullanmadigindan emin olun.")
 
     tracker = HandTracker()
     detector = GestureDetector()
     canvas = CanvasManager(width=640, height=480)
+    cells = palette_cells(640)
+
+    show_pip = True
+    last_composed = None
+    prev_gesture = "NONE"
+
+    palette_hover_color = None
+    palette_hover_frames = 0
+    palette_dwell = 5
 
     window = "AirCanvas AI"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+
+    modifying = {"DRAW", "ERASE", "PINCH", "CLEAR_ALL", "SCREENSHOT"}
 
     while True:
         ok, frame = cap.read()
@@ -70,9 +69,34 @@ def main():
             break
 
         frame = cv2.flip(frame, 1)
+        raw_camera = frame.copy()
+
         landmarks, handedness = tracker.find_landmarks(frame, draw=True)
         fingers = tracker.fingers_up(landmarks, handedness or "Right")
         gesture = detector.detect(landmarks, fingers)
+
+        # Palet üzerine hover kontrolü
+        if landmarks is not None and gesture in ("DRAW", "PEN_UP", "HOVER"):
+            picked = hit_test_palette(landmarks[8], cells)
+            if picked is not None:
+                if picked == palette_hover_color:
+                    palette_hover_frames += 1
+                else:
+                    palette_hover_color = picked
+                    palette_hover_frames = 1
+                if palette_hover_frames >= palette_dwell:
+                    canvas.set_brush(picked, canvas.brush_thickness)
+                if gesture == "DRAW":
+                    gesture = "PEN_UP"
+            else:
+                palette_hover_color = None
+                palette_hover_frames = 0
+        else:
+            palette_hover_color = None
+            palette_hover_frames = 0
+
+        if gesture in modifying and prev_gesture not in modifying:
+            canvas.push_history()
 
         if landmarks is not None:
             index_tip = landmarks[8]
@@ -97,12 +121,11 @@ def main():
             elif gesture == "CLEAR_ALL":
                 canvas.clear_all()
             elif gesture == "SCREENSHOT":
-                canvas.freeze_background(frame)
+                canvas.set_background(frame.copy())
             else:
                 canvas.reset_pen()
                 canvas.release_drag()
 
-            # Görsel imleç / geri bildirim
             if gesture == "ERASE":
                 cv2.circle(frame, eraser_point, canvas.eraser_thickness // 2, (200, 200, 200), 2)
             elif gesture == "PEN_UP":
@@ -114,8 +137,13 @@ def main():
                 cv2.line(frame, landmarks[4], landmarks[8], (0, 255, 0), 2)
                 cv2.circle(frame, index_tip, 10, (0, 255, 0), 2)
 
-        composed = canvas.compose(frame)
-        overlay_hud(composed, gesture, canvas.brush_color, canvas.brush_thickness)
+        prev_gesture = gesture
+
+        composed = canvas.compose(frame, pip_frame=raw_camera if show_pip else None)
+        draw_palette(composed, cells, canvas.brush_color)
+        extra = "Sekil ON" if canvas.shape_correction else None
+        draw_hud(composed, gesture, canvas.brush_color, canvas.brush_thickness, extra_info=extra)
+        last_composed = composed
 
         cv2.imshow(window, composed)
 
@@ -124,18 +152,28 @@ def main():
             break
         elif key == ord("c"):
             canvas.clear_all()
-        elif key == ord("n"):
-            if landmarks is not None:
-                canvas.add_note("AirCanvas AI", landmarks[8])
-        elif key in COLORS:
-            canvas.set_brush(COLORS[key], canvas.brush_thickness)
+        elif key == ord("z"):
+            canvas.undo()
+        elif key == ord("y"):
+            canvas.redo()
+        elif key == ord("n") and landmarks is not None:
+            canvas.add_note("AirCanvas", landmarks[8])
+        elif key in COLOR_KEYS:
+            canvas.set_brush(COLOR_KEYS[key], canvas.brush_thickness)
         elif key == ord("+") or key == ord("="):
             canvas.set_brush(canvas.brush_color, min(canvas.brush_thickness + 2, 40))
         elif key == ord("-"):
             canvas.set_brush(canvas.brush_color, max(canvas.brush_thickness - 2, 2))
-        elif gesture == "SCREENSHOT":
-            saved = canvas.save_screenshot(composed)
-            print(f"[screenshot] kaydedildi -> {saved}")
+        elif key == ord("s"):
+            canvas.shape_correction = not canvas.shape_correction
+            print(f"[sekil duzeltme] {'ON' if canvas.shape_correction else 'OFF'}")
+        elif key == ord("h"):
+            show_pip = not show_pip
+        elif key == ord("b"):
+            canvas.background = None
+        elif key == ord("p") and last_composed is not None:
+            fname = canvas.save_screenshot(last_composed)
+            print(f"[png] kaydedildi -> {fname}")
 
     cap.release()
     cv2.destroyAllWindows()

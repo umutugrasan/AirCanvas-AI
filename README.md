@@ -1,23 +1,34 @@
 # AirCanvas AI — Gesture-Controlled Note & Web App
 
-Web kamerası önündeki el hareketlerini gerçek zamanlı analiz eden, OpenCV + MediaPipe + Streamlit tabanlı bir jest kontrollü çizim ve not alma platformu.
+Web kamerası önündeki el hareketlerini gerçek zamanlı analiz eden, OpenCV + MediaPipe + Streamlit tabanlı bir jest kontrollü çizim, not alma ve **resim annotation** platformu.
 
 ## Özellikler
+
+### Jestler
 
 | Jest | Mantık (MediaPipe) | Tetiklenen İşlev |
 |------|--------------------|------------------|
 | **Hassas Çizim** | Sadece işaret parmağı açık (başparmak yumruğa kıvrık) | 8. nokta (işaret ucu) takibiyle tuvale çizim |
 | **Kalem Havada** | İşaret + başparmak birlikte açık | Çizmez, sadece imleci taşır — harfler arası boşluk için |
-| **Tutma / Taşıma** | Başparmak ucu + işaret ucu birbirine değer (pinch) | Parmağın altında not varsa onu, yoksa tüm tuvali blok halinde taşır |
+| **Tutma / Taşıma** | Başparmak ucu + işaret ucu birbirine değer (pinch) | Parmak altında not varsa onu, yoksa tüm tuvali blok halinde taşır |
 | **Akıllı Silgi** | İşaret + orta parmak açık (makas/barış işareti) | İki parmağın orta noktası bölgesel silgi olur |
 | **Ekran Görüntüsü** | Yumruk → ani 5 parmak açılışı | Mevcut kareyi dondurup "kağıt altlık" haline getirir |
-| **Tüm Ekranı Temizle** | 5 parmak açık avuç | Tüm çizimleri ve notları sıfırlar |
+| **Tüm Ekranı Temizle** | 5 parmak açık avuç | Tüm çizimleri, notları ve geçmişi sıfırlar |
+
+### Ekstra (jest dışı) yetenekler
+
+- **Resim yükle → üzerine yaz**: yan panelden PNG/JPG yükle, üstüne not düş.
+- **PIP webcam**: kullanıcı sağ alt köşede küçük thumbnail olarak görünür.
+- **Havadan renk paleti**: ekranın üst şeridindeki paletin üzerine işaret parmağıyla yaklaş, ~5 kare bekle → renk seçilir. Çizim akışını kesmez.
+- **Geri al / Yinele**: her stroke öncesi canvas snapshot'ı; sınır 30 adım.
+- **Şekil düzeltme** (toggleable): DRAW jesti bitince stroke yeterince kapalıysa elipse, yeterince doğrusalsa düz çizgiye snap eder.
+- **PNG olarak indir**: composed (kamera + tuval + arka plan + notlar) tek tıkla indirilir.
 
 ## Teknolojik Altyapı
 
-- **OpenCV** — kamera akışı, görüntü dönüşümleri, katman birleştirme
+- **OpenCV** — kamera akışı, görüntü dönüşümleri, `warpAffine` ile blok taşıma, `fitEllipse`/`fitLine` ile şekil düzeltme
 - **MediaPipe Hands** — 21 eklem noktasıyla gerçek zamanlı el iskeleti takibi
-- **NumPy** — sanal tuval matrisi (640×480×3) yönetimi ve `warpAffine` ile blok taşıma
+- **NumPy** — sanal tuval matrisi (640×480×3) yönetimi
 - **Streamlit + streamlit-webrtc** — tarayıcıda canlı webcam akışı
 
 ## Proje Yapısı
@@ -25,12 +36,13 @@ Web kamerası önündeki el hareketlerini gerçek zamanlı analiz eden, OpenCV +
 ```
 .
 ├── app.py                 # Streamlit web sürümü (streamlit run app.py)
-├── aircanvas.py           # Bağımsız OpenCV penceresi sürümü
+├── aircanvas.py           # Bağımsız OpenCV pencere sürümü
 ├── hand_tracker.py        # MediaPipe Hands sarmalayıcısı
-├── gesture_detector.py    # Parmak durumu → jest etiketi
-├── canvas_manager.py      # Tuval, notlar, screenshot ve blok taşıma katmanı
+├── gesture_detector.py    # Parmak durumu → jest etiketi (durum makinesi)
+├── canvas_manager.py      # Tuval, notlar, history, blok taşıma, şekil düzeltme
+├── overlay.py             # Palet + HUD katmanı (her iki sürüm paylaşır)
 ├── requirements.txt
-└── screenshots/           # SCREENSHOT jesti kayıtları (otomatik oluşur)
+└── screenshots/           # SCREENSHOT / "p" kısayolu kayıtları
 ```
 
 ## Kurulum
@@ -55,7 +67,13 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Tarayıcı sekmesinde **START** düğmesine basıp kamera izni verin. Yan panelden fırça rengini, kalınlığını ayarlayabilir; not metnini yazıp **Not ekle** ile parmak ucuna bir etiket bırakabilirsiniz. **Tuvali temizle** düğmesi tüm çizimleri sıfırlar.
+Tarayıcı sekmesinde **START** → kamera izni ver. Yan panelden:
+
+- Fırça rengi, kalınlık, Geri al / Yinele, Tuvali temizle
+- **Resim yükle** → çizimi mevcut resim üzerine yap
+- **Sağ altta PIP webcam** kutusunu aç/kapat
+- **Şekil düzeltme** anahtarı
+- **PNG olarak indir** düğmesi (akışı başlattıktan sonra görünür)
 
 ### Bağımsız OpenCV sürümü
 
@@ -63,19 +81,22 @@ Tarayıcı sekmesinde **START** düğmesine basıp kamera izni verin. Yan paneld
 python aircanvas.py
 ```
 
-Klavye kısayolları:
-
 | Tuş | İşlev |
 |-----|-------|
 | `q` | Çık |
 | `c` | Tuvali temizle |
-| `n` | Mevcut işaret parmağı ucuna örnek not bırak |
-| `1` / `2` / `3` / `4` | Fırça rengi: mavi / yeşil / kırmızı / sarı |
-| `+` / `-` | Fırça kalınlığını arttır / azalt |
+| `z` / `y` | Geri al / Yinele |
+| `n` | Mevcut parmak ucuna örnek not |
+| `1`–`6` | Palet renkleri (mavi/yeşil/kırmızı/sarı/pembe/beyaz) |
+| `+` / `-` | Fırça kalınlığı |
+| `s` | Şekil düzeltmeyi aç/kapat |
+| `p` | Mevcut kareyi PNG olarak kaydet |
+| `b` | Arka planı (yüklenen resim/screenshot) temizle |
+| `h` | PIP webcam'i aç/kapat |
 
 ## Görsel İmleç Geri Bildirimi
 
-Karenin üst şeridinde gerçek zamanlı jest etiketi görünür; ayrıca:
+Karenin üst şeridinde gerçek zamanlı jest etiketi; ayrıca:
 
 - 🟡 Boş sarı halka → kalem havada (PEN_UP)
 - 🔵 Dolu daire (fırça renginde) → kalem yerde (DRAW)
@@ -85,10 +106,13 @@ Karenin üst şeridinde gerçek zamanlı jest etiketi görünür; ayrıca:
 ## Mimari Notlar
 
 - `HandTracker.fingers_up()` her parmağın açık/kapalı durumunu, parmak ucu landmark'ının PIP eklemine göre konumuna bakarak çıkarır. Başparmak için yatay (X) karşılaştırma, diğerleri için dikey (Y) karşılaştırma kullanılır.
-- `GestureDetector.detect()` durum makinesi yapısında çalışır: **yumruk → açık el** geçişini zaman penceresiyle (0.6 s) yakalar, ardışık screenshot için cooldown (1.2 s) uygular.
+- `GestureDetector.detect()` durum makinesi: **yumruk → açık el** geçişini zaman penceresiyle (0.6 s) yakalar, ardışık screenshot için cooldown (1.2 s) uygular.
 - `CanvasManager.drag()` parmak ucunda not varsa onu, yoksa tuvali baştan snapshot alıp `cv2.warpAffine` ile öteleyerek tüm çizimleri tek bir blok gibi taşır.
-- `CanvasManager.compose()` siyah pikselleri şeffaf kabul ederek tuvali ham kameraya maskeleyerek bindirir; böylece çizgiler kayboldukları yerlerde kamera akışını gizlemez.
+- `CanvasManager.push_history()` "değiştirici" jest (DRAW/ERASE/PINCH/CLEAR/SCREENSHOT) başlamadan önce çağrılır; en fazla 30 snapshot tutulur.
+- `CanvasManager._correct_stroke_in_place()` chord/uzunluk oranına bakarak stroke'un kapalı mı doğrusal mı olduğuna karar verir; sonra `fitEllipse` veya `fitLine` ile snap eder.
+- `overlay.palette_cells()` palet hücrelerini frame genişliğine göre hesaplar; `hit_test_palette` parmak ucu hangi hücrede onu döndürür. ~5 kare dwell süresi accidental seçimi engeller.
+- `CanvasManager.compose()` siyah piksellerini şeffaf kabul ederek tuvali base'e (kamera frame'i veya yüklenen arka plan) maskeleyerek bindirir; PIP webcam'i sağ alt köşeye yerleştirir.
 
 ## CV Değerlendirme Notu
 
-Proje, sadece hazır derin öğrenme modellerini çalıştırmakla kalmaz; gerçek zamanlı video akışı, durum makineli jest analizi, durum yönetimi (sürüklenen nesneler, blok taşıma, screenshot tetikleyicisi), kullanıcı arayüzü etkileşimi ve modüler Python mimarisi gibi kıdemli mühendislik pratiklerini sergiler.
+Proje, sadece hazır derin öğrenme modellerini çalıştırmakla kalmaz; gerçek zamanlı video akışı, durum makineli jest analizi, undo/redo geçmişi, blok taşıma, otomatik şekil düzeltme (`fitEllipse`/`fitLine`), kullanıcı arayüzü etkileşimi ve modüler Python mimarisi gibi kıdemli mühendislik pratiklerini sergiler.
