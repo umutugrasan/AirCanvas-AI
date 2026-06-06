@@ -20,14 +20,14 @@ from canvas_manager import CanvasManager
 from gesture_detector import GestureDetector
 from hand_tracker import HandTracker
 from overlay import (
-    MAX_THICKNESS,
-    MIN_THICKNESS,
     PALETTE_COLORS,
     draw_hud,
     draw_palette,
+    draw_thickness_strip,
     hit_test_palette,
+    hit_test_thickness,
     palette_cells,
-    thickness_from_spread,
+    thickness_cells,
 )
 
 
@@ -56,10 +56,12 @@ class AirCanvasProcessor(VideoProcessorBase):
         self.shape_correction = False
         self.show_pip = True
 
-        # Palette hover dwell-time (anlık dokunuş seçmesin)
+        # Palette / kalınlık hover dwell-time (anlık dokunuş seçmesin)
         self._palette_hover_color = None
         self._palette_hover_frames = 0
-        self._palette_dwell_required = 5
+        self._thickness_hover_value = None
+        self._thickness_hover_frames = 0
+        self._hover_dwell_required = 5
 
         # Performans: her N karede bir MediaPipe inference
         self._frame_idx = 0
@@ -114,37 +116,50 @@ class AirCanvasProcessor(VideoProcessorBase):
         fingers = self.tracker.fingers_up(landmarks, handedness or "Right")
         gesture = self.detector.detect(landmarks, fingers)
 
-        # Palette hit-test (sadece DRAW/PEN_UP/HOVER esnasında)
-        cells = palette_cells(640)
-        over_palette = False
+        # Palette + kalınlık şeridi hit-test (sadece DRAW/PEN_UP/HOVER esnasında)
+        p_cells = palette_cells(640)
+        t_cells = thickness_cells(640, 480)
+        over_ui = False
         if landmarks is not None and gesture in ("DRAW", "PEN_UP", "HOVER"):
-            picked = hit_test_palette(landmarks[8], cells)
-            if picked is not None:
-                over_palette = True
-                if picked == self._palette_hover_color:
+            picked_color = hit_test_palette(landmarks[8], p_cells)
+            picked_thickness = hit_test_thickness(landmarks[8], t_cells)
+
+            if picked_color is not None:
+                over_ui = True
+                if picked_color == self._palette_hover_color:
                     self._palette_hover_frames += 1
                 else:
-                    self._palette_hover_color = picked
+                    self._palette_hover_color = picked_color
                     self._palette_hover_frames = 1
-                if self._palette_hover_frames >= self._palette_dwell_required:
-                    self.brush_color = picked
-                    self.canvas.set_brush(picked, self.brush_thickness)
-                # Palette alanındayken DRAW'ı süpürelim, oraya çizmesin
-                if gesture == "DRAW":
-                    gesture = "PEN_UP"
+                if self._palette_hover_frames >= self._hover_dwell_required:
+                    self.brush_color = picked_color
+                    self.canvas.set_brush(picked_color, self.brush_thickness)
             else:
                 self._palette_hover_color = None
                 self._palette_hover_frames = 0
+
+            if picked_thickness is not None:
+                over_ui = True
+                if picked_thickness == self._thickness_hover_value:
+                    self._thickness_hover_frames += 1
+                else:
+                    self._thickness_hover_value = picked_thickness
+                    self._thickness_hover_frames = 1
+                if self._thickness_hover_frames >= self._hover_dwell_required:
+                    self.brush_thickness = picked_thickness
+                    self.canvas.set_brush(self.brush_color, picked_thickness)
+            else:
+                self._thickness_hover_value = None
+                self._thickness_hover_frames = 0
+
+            # UI alanındayken DRAW'ı süpürelim, oraya çizmesin
+            if over_ui and gesture == "DRAW":
+                gesture = "PEN_UP"
         else:
             self._palette_hover_color = None
             self._palette_hover_frames = 0
-
-        # PEN_UP esnasında başparmak-işaret açıklığı = fırça kalınlığı
-        if gesture == "PEN_UP" and landmarks is not None and not over_palette:
-            target = thickness_from_spread(landmarks[4], landmarks[8])
-            smoothed = 0.7 * self.brush_thickness + 0.3 * target
-            self.brush_thickness = max(MIN_THICKNESS, min(MAX_THICKNESS, int(round(smoothed))))
-            self.canvas.set_brush(self.brush_color, self.brush_thickness)
+            self._thickness_hover_value = None
+            self._thickness_hover_frames = 0
 
         self._maybe_push_history(gesture)
 
@@ -198,7 +213,8 @@ class AirCanvasProcessor(VideoProcessorBase):
         self._prev_gesture = gesture
 
         composed = self.canvas.compose(img, pip_frame=raw_camera if self.show_pip else None)
-        draw_palette(composed, cells, self.brush_color)
+        draw_palette(composed, p_cells, self.brush_color)
+        draw_thickness_strip(composed, t_cells, self.brush_color, self.brush_thickness)
         extra = "Sekil duzeltme: ON" if self.shape_correction else None
         draw_hud(composed, gesture, self.brush_color, self.brush_thickness, extra_info=extra)
 

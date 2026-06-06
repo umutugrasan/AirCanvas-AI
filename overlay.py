@@ -1,22 +1,12 @@
-"""Renk paleti, HUD ve jest tabanlı kalınlık hesabı (app.py + aircanvas.py paylaşır)."""
-
-import math
+"""Renk paleti, kalınlık şeridi ve HUD katmanı (app.py + aircanvas.py paylaşır)."""
 
 import cv2
 
 
 MIN_THICKNESS = 2
 MAX_THICKNESS = 30
-SPREAD_MIN_PX = 40   # parmaklar bitişikken
-SPREAD_MAX_PX = 200  # parmaklar tam açıkken
-
-
-def thickness_from_spread(thumb_tip, index_tip):
-    """Başparmak-işaret mesafesini [MIN, MAX] kalınlık aralığına eşler."""
-    d = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
-    d = max(SPREAD_MIN_PX, min(SPREAD_MAX_PX, d))
-    span = SPREAD_MAX_PX - SPREAD_MIN_PX
-    return MIN_THICKNESS + (d - SPREAD_MIN_PX) / span * (MAX_THICKNESS - MIN_THICKNESS)
+THICKNESS_LEVELS = [3, 8, 14, 22, 30]
+THICKNESS_CELL = 55
 
 
 PALETTE_COLORS = [
@@ -68,6 +58,50 @@ def draw_palette(frame, cells, active_color):
         border = (255, 255, 255) if cell["color"] != (255, 255, 255) else (0, 0, 0)
         thickness = 3 if tuple(cell["color"]) == tuple(active_color) else 1
         cv2.rectangle(frame, (x, y), (x + w, y + h), border, thickness)
+
+
+def thickness_cells(frame_w, frame_h):
+    """Sağ kenara dikey kalınlık şeridi hücreleri."""
+    total_h = len(THICKNESS_LEVELS) * THICKNESS_CELL
+    start_y = max(PALETTE_BOTTOM + 15, (frame_h - total_h) // 2)
+    x = frame_w - THICKNESS_CELL - 8
+    cells = []
+    for i, t in enumerate(THICKNESS_LEVELS):
+        y = start_y + i * THICKNESS_CELL
+        cells.append({
+            "thickness": t,
+            "rect": (x, y, THICKNESS_CELL - 6, THICKNESS_CELL - 6),
+        })
+    return cells
+
+
+def hit_test_thickness(point, cells):
+    if point is None:
+        return None
+    px, py = point
+    for cell in cells:
+        x, y, w, h = cell["rect"]
+        if x <= px <= x + w and y <= py <= y + h:
+            return cell["thickness"]
+    return None
+
+
+def draw_thickness_strip(frame, cells, brush_color, active_thickness):
+    for cell in cells:
+        x, y, w, h = cell["rect"]
+        # Yarı şeffaf koyu kart
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), (40, 40, 40), -1)
+        cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
+        # Çerçeve — aktif kalınlığa kalın sarı
+        is_active = cell["thickness"] == active_thickness
+        border_col = (0, 255, 255) if is_active else (200, 200, 200)
+        border_t = 3 if is_active else 1
+        cv2.rectangle(frame, (x, y), (x + w, y + h), border_col, border_t)
+        # Kalınlığı temsil eden, mevcut fırça renginde dolu daire
+        cx = x + w // 2
+        cy = y + h // 2
+        cv2.circle(frame, (cx, cy), cell["thickness"], brush_color, -1)
 
 
 def draw_hud(frame, gesture, brush_color, brush_thickness, extra_info=None):

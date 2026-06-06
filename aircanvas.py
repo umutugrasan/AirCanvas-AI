@@ -24,14 +24,14 @@ from canvas_manager import CanvasManager
 from gesture_detector import GestureDetector
 from hand_tracker import HandTracker
 from overlay import (
-    MAX_THICKNESS,
-    MIN_THICKNESS,
     PALETTE_COLORS,
     draw_hud,
     draw_palette,
+    draw_thickness_strip,
     hit_test_palette,
+    hit_test_thickness,
     palette_cells,
-    thickness_from_spread,
+    thickness_cells,
 )
 
 
@@ -51,7 +51,8 @@ def main():
     tracker = HandTracker()
     detector = GestureDetector()
     canvas = CanvasManager(width=640, height=480)
-    cells = palette_cells(640)
+    p_cells = palette_cells(640)
+    t_cells = thickness_cells(640, 480)
 
     show_pip = True
     last_composed = None
@@ -59,7 +60,9 @@ def main():
 
     palette_hover_color = None
     palette_hover_frames = 0
-    palette_dwell = 5
+    thickness_hover_value = None
+    thickness_hover_frames = 0
+    hover_dwell = 5
 
     # Frame-skip cache
     frame_idx = 0
@@ -92,34 +95,45 @@ def main():
         fingers = tracker.fingers_up(landmarks, handedness or "Right")
         gesture = detector.detect(landmarks, fingers)
 
-        # Palet üzerine hover kontrolü
-        over_palette = False
+        # Palet + kalınlık şeridi hover kontrolü
+        over_ui = False
         if landmarks is not None and gesture in ("DRAW", "PEN_UP", "HOVER"):
-            picked = hit_test_palette(landmarks[8], cells)
-            if picked is not None:
-                over_palette = True
-                if picked == palette_hover_color:
+            picked_color = hit_test_palette(landmarks[8], p_cells)
+            picked_thickness = hit_test_thickness(landmarks[8], t_cells)
+
+            if picked_color is not None:
+                over_ui = True
+                if picked_color == palette_hover_color:
                     palette_hover_frames += 1
                 else:
-                    palette_hover_color = picked
+                    palette_hover_color = picked_color
                     palette_hover_frames = 1
-                if palette_hover_frames >= palette_dwell:
-                    canvas.set_brush(picked, canvas.brush_thickness)
-                if gesture == "DRAW":
-                    gesture = "PEN_UP"
+                if palette_hover_frames >= hover_dwell:
+                    canvas.set_brush(picked_color, canvas.brush_thickness)
             else:
                 palette_hover_color = None
                 palette_hover_frames = 0
+
+            if picked_thickness is not None:
+                over_ui = True
+                if picked_thickness == thickness_hover_value:
+                    thickness_hover_frames += 1
+                else:
+                    thickness_hover_value = picked_thickness
+                    thickness_hover_frames = 1
+                if thickness_hover_frames >= hover_dwell:
+                    canvas.set_brush(canvas.brush_color, picked_thickness)
+            else:
+                thickness_hover_value = None
+                thickness_hover_frames = 0
+
+            if over_ui and gesture == "DRAW":
+                gesture = "PEN_UP"
         else:
             palette_hover_color = None
             palette_hover_frames = 0
-
-        # PEN_UP esnasında başparmak-işaret açıklığı = fırça kalınlığı
-        if gesture == "PEN_UP" and landmarks is not None and not over_palette:
-            target = thickness_from_spread(landmarks[4], landmarks[8])
-            smoothed = 0.7 * canvas.brush_thickness + 0.3 * target
-            new_t = max(MIN_THICKNESS, min(MAX_THICKNESS, int(round(smoothed))))
-            canvas.set_brush(canvas.brush_color, new_t)
+            thickness_hover_value = None
+            thickness_hover_frames = 0
 
         if gesture in modifying and prev_gesture not in modifying:
             canvas.push_history()
@@ -168,7 +182,8 @@ def main():
         prev_gesture = gesture
 
         composed = canvas.compose(frame, pip_frame=raw_camera if show_pip else None)
-        draw_palette(composed, cells, canvas.brush_color)
+        draw_palette(composed, p_cells, canvas.brush_color)
+        draw_thickness_strip(composed, t_cells, canvas.brush_color, canvas.brush_thickness)
         extra = "Sekil ON" if canvas.shape_correction else None
         draw_hud(composed, gesture, canvas.brush_color, canvas.brush_thickness, extra_info=extra)
         last_composed = composed
