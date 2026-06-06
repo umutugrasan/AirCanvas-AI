@@ -11,12 +11,14 @@ class HandTracker:
 
     TIP_IDS = [4, 8, 12, 16, 20]  # thumb, index, middle, ring, pinky tips
 
-    def __init__(self, max_hands=1, detection_conf=0.85, tracking_conf=0.7):
+    def __init__(self, max_hands=1, detection_conf=0.7, tracking_conf=0.5, model_complexity=0):
         self.mp_hands = mp.solutions.hands
         self.mp_draw = mp.solutions.drawing_utils
         self.mp_styles = mp.solutions.drawing_styles
+        # model_complexity=0 → "Lite" model, CPU'da ~2x hızlı, doğruluk küçük düşer
         self.hands = self.mp_hands.Hands(
             max_num_hands=max_hands,
+            model_complexity=model_complexity,
             min_detection_confidence=detection_conf,
             min_tracking_confidence=tracking_conf,
         )

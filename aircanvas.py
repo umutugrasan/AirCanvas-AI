@@ -61,6 +61,12 @@ def main():
     palette_hover_frames = 0
     palette_dwell = 5
 
+    # Frame-skip cache
+    frame_idx = 0
+    inference_every = 2
+    cached_landmarks = None
+    cached_handedness = None
+
     window = "AirCanvas AI"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
 
@@ -74,7 +80,15 @@ def main():
         frame = cv2.flip(frame, 1)
         raw_camera = frame.copy()
 
-        landmarks, handedness = tracker.find_landmarks(frame, draw=True)
+        frame_idx += 1
+        if frame_idx % inference_every == 0:
+            landmarks, handedness = tracker.find_landmarks(frame, draw=True)
+            cached_landmarks = landmarks
+            cached_handedness = handedness
+        else:
+            landmarks = cached_landmarks
+            handedness = cached_handedness
+
         fingers = tracker.fingers_up(landmarks, handedness or "Right")
         gesture = detector.detect(landmarks, fingers)
 

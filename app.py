@@ -61,6 +61,12 @@ class AirCanvasProcessor(VideoProcessorBase):
         self._palette_hover_frames = 0
         self._palette_dwell_required = 5
 
+        # Performans: her N karede bir MediaPipe inference
+        self._frame_idx = 0
+        self._inference_every = 2  # 2 → fps yarısı kadar inference, kalanı cache
+        self._cached_landmarks = None
+        self._cached_handedness = None
+
         # Gesture transition
         self._prev_gesture = "NONE"
         self.last_composed = None
@@ -94,7 +100,17 @@ class AirCanvasProcessor(VideoProcessorBase):
             self.canvas.redo()
             self.redo_flag = False
 
-        landmarks, handedness = self.tracker.find_landmarks(img, draw=True)
+        # MediaPipe inference'i her N karede bir yap; arada cache'i kullan.
+        # Cizim ve cursor responsive kalsin diye landmarks'i sakliyoruz.
+        self._frame_idx += 1
+        if self._frame_idx % self._inference_every == 0:
+            landmarks, handedness = self.tracker.find_landmarks(img, draw=True)
+            self._cached_landmarks = landmarks
+            self._cached_handedness = handedness
+        else:
+            landmarks = self._cached_landmarks
+            handedness = self._cached_handedness
+
         fingers = self.tracker.fingers_up(landmarks, handedness or "Right")
         gesture = self.detector.detect(landmarks, fingers)
 
